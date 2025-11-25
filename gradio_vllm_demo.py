@@ -1,6 +1,9 @@
 import os
 import sys
 import time
+import json
+import traceback
+from datetime import datetime
 import gradio as gr
 from typing import Optional, List, Tuple
 
@@ -13,6 +16,40 @@ import glob
 import numpy as np
 import zipfile
 import shutil
+
+
+# ============================================
+# 日志辅助函数
+# ============================================
+def log_info(msg: str):
+    """输出带时间戳的 INFO 日志"""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [INFO] {msg}")
+
+def log_success(msg: str):
+    """输出带时间戳的成功日志"""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [✓ OK] {msg}")
+
+def log_warning(msg: str):
+    """输出带时间戳的警告日志"""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [⚠ WARN] {msg}")
+
+def log_error(msg: str):
+    """输出带时间戳的错误日志"""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [✗ ERROR] {msg}")
+
+def log_progress(current: int, total: int, task: str, extra: str = ""):
+    """输出进度日志"""
+    ts = datetime.now().strftime("%H:%M:%S")
+    pct = (current / total * 100) if total > 0 else 0
+    bar_len = 20
+    filled = int(bar_len * current / total) if total > 0 else 0
+    bar = "█" * filled + "░" * (bar_len - filled)
+    extra_str = f" | {extra}" if extra else ""
+    print(f"[{ts}] [{bar}] {current}/{total} ({pct:.1f}%) {task}{extra_str}")
 
 
 # Add vLLM module directory to import path
@@ -321,26 +358,41 @@ def process_batch_upload(
     """处理上传的多张图片（支持远程客户端）"""
     try:
         if not uploaded_files:
-            return "请先上传图片文件", ""
+            return "请先上传图片文件", "", None
         
+        batch_start_time = time.time()
+        log_info("=" * 50)
+        log_info(f"📚 开始批量处理任务")
+        log_info(f"   文件数量: {len(uploaded_files)}")
+        log_info(f"   识别模式: {prompt_type}")
+        log_info(f"   模型精度: {model_size}")
+        log_info(f"   智能裁剪: {'是' if crop_mode else '否'}")
+        log_info("=" * 50)
+        
+        log_info("正在初始化推理引擎...")
         llm_local = init_llm(
             max_concurrency=max_concurrency,
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=8192,
         )
+        log_success("推理引擎就绪")
 
+        log_info("正在加载图片...")
         images = []
         valid_paths = []
-        for file_path in uploaded_files:
+        for idx, file_path in enumerate(uploaded_files):
             try:
                 image = Image.open(file_path).convert("RGB")
                 images.append(image)
                 valid_paths.append(file_path)
+                log_progress(idx + 1, len(uploaded_files), "加载图片", os.path.basename(file_path))
             except Exception as e:
-                print(f"skip file: {file_path} due to error: {e}")
+                log_warning(f"跳过文件: {os.path.basename(file_path)} - {e}")
 
         if not images:
-            return "没有可处理的有效图片文件", ""
+            return "没有可处理的有效图片文件", "", None
+        
+        log_success(f"成功加载 {len(images)} 张图片")
 
         if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
@@ -354,9 +406,12 @@ def process_batch_upload(
         preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
+        
+        log_info(f"正在预处理图片 (base_size={base_size}, image_size={image_size})...")
+        preprocess_start = time.time()
         proc = DeepseekOCRProcessor(image_size=image_size, base_size=base_size)
         batch_inputs = []
-        for img in images:
+        for idx, img in enumerate(images):
             image_features = proc.tokenize_with_images(
                 images=[img], bos=True, eos=True, cropping=crop_mode
             )
@@ -365,6 +420,10 @@ def process_batch_upload(
                 "multi_modal_data": {"image": image_features},
             }
             batch_inputs.append(cache_item)
+            if (idx + 1) % 5 == 0 or idx == len(images) - 1:
+                log_progress(idx + 1, len(images), "预处理图片")
+        preprocess_time = time.time() - preprocess_start
+        log_success(f"预处理完成，耗时 {preprocess_time:.2f} 秒")
 
         logits_processors = [
             NoRepeatNGramLogitsProcessor(
@@ -379,12 +438,18 @@ def process_batch_upload(
             skip_special_tokens=False,
         )
 
+        log_info(f"🚀 开始批量推理 ({len(batch_inputs)} 张图片)...")
+        inference_start = time.time()
         outputs_list = llm_local.generate(batch_inputs, sampling_params=sampling_params)
+        inference_time = time.time() - inference_start
+        avg_time = inference_time / len(batch_inputs) if batch_inputs else 0
+        log_success(f"推理完成，总耗时 {inference_time:.2f} 秒，平均 {avg_time:.2f} 秒/张")
 
         ts = time.strftime("%Y%m%d_%H%M%S")
         out_dir = os.path.join("outputs", "vllm_gradio_batch", ts)
         os.makedirs(out_dir, exist_ok=True)
 
+        log_info("正在保存识别结果...")
         preview_texts = []
         for idx, (output, file_path) in enumerate(zip(outputs_list, valid_paths)):
             content = output.outputs[0].text
@@ -424,10 +489,19 @@ def process_batch_upload(
                     arcname = os.path.relpath(file_path, out_dir)
                     zf.write(file_path, arcname)
 
-        return f"已处理 {len(images)} 张图片，结果保存到: {out_dir}", "\n\n".join(preview_texts), zip_path
+        total_time = time.time() - batch_start_time
+        log_info("=" * 50)
+        log_success(f"📚 批量处理完成！")
+        log_info(f"   处理图片: {len(images)} 张")
+        log_info(f"   总耗时: {total_time:.2f} 秒")
+        log_info(f"   平均速度: {total_time/len(images):.2f} 秒/张")
+        log_info(f"   输出目录: {out_dir}")
+        log_info("=" * 50)
+        
+        return f"✅ 已处理 {len(images)} 张图片\n⏱️ 总耗时: {total_time:.1f} 秒\n📁 结果保存到: {out_dir}", "\n\n".join(preview_texts), zip_path
 
     except Exception as e:
-        import traceback
+        log_error(f"批量处理失败: {str(e)}")
         return f"处理出错: {str(e)}\n{traceback.format_exc()}", "", None
 
 
@@ -666,6 +740,19 @@ def process_pdf(
             return "未检测到 PDF 文件，请先上传后再点击处理。", "", None
         if isinstance(pdf_path, str) and not os.path.exists(pdf_path):
             return f"文件不存在：{pdf_path}", "", None
+        
+        pdf_start_time = time.time()
+        pdf_name = os.path.basename(pdf_path)
+        log_info("=" * 60)
+        log_info(f"📄 开始处理 PDF: {pdf_name}")
+        log_info("=" * 60)
+        log_info(f"   DPI: {dpi}")
+        log_info(f"   识别模式: {prompt_type}")
+        log_info(f"   模型档位: {model_size}")
+        log_info(f"   裁剪模式: {'开启' if crop_mode else '关闭'}")
+        log_info(f"   最大Token: {max_tokens}")
+        log_info(f"   导出布局PDF: {'是' if export_layout_pdf else '否'}")
+        
         llm_local = init_llm(
             max_concurrency=max_concurrency,
             gpu_memory_utilization=gpu_memory_utilization,
@@ -681,16 +768,23 @@ def process_pdf(
         else:
             prompt = "<image>\nFree OCR. "
 
+        log_info(f"📖 正在转换 PDF 为图片 (DPI={dpi})...")
+        convert_start = time.time()
         images = pdf_to_images_high_quality(pdf_path, dpi=dpi)
+        convert_time = time.time() - convert_start
         if not images:
             return "PDF 中无可处理页面", "", None
+        log_success(f"   PDF转换完成: {len(images)} 页, 耗时 {convert_time:.2f} 秒")
 
         preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
         proc = DeepseekOCRProcessor(image_size=image_size, base_size=base_size)
+        
+        log_info(f"🔧 正在预处理 {len(images)} 页...")
+        preprocess_start = time.time()
         batch_inputs = []
-        for img in images:
+        for idx, img in enumerate(images):
             image_features = proc.tokenize_with_images(
                 images=[img], bos=True, eos=True, cropping=crop_mode
             )
@@ -699,6 +793,10 @@ def process_pdf(
                 "multi_modal_data": {"image": image_features},
             }
             batch_inputs.append(cache_item)
+            if (idx + 1) % 5 == 0 or idx == len(images) - 1:
+                log_progress(idx + 1, len(images), "预处理")
+        preprocess_time = time.time() - preprocess_start
+        log_success(f"   预处理完成, 耗时 {preprocess_time:.2f} 秒")
 
         logits_processors = [
             NoRepeatNGramLogitsProcessor(
@@ -713,13 +811,19 @@ def process_pdf(
             include_stop_str_in_output=True,
         )
 
+        log_info(f"🚀 开始OCR推理 ({len(images)} 页)...")
+        inference_start = time.time()
         outputs_list = llm_local.generate(batch_inputs, sampling_params=sampling_params)
+        inference_time = time.time() - inference_start
+        avg_time = inference_time / len(images) if images else 0
+        log_success(f"   推理完成, 总耗时 {inference_time:.2f} 秒, 平均 {avg_time:.2f} 秒/页")
 
         ts = time.strftime("%Y%m%d_%H%M%S")
         out_dir = os.path.join("outputs", "vllm_gradio_pdf", ts)
         os.makedirs(out_dir, exist_ok=True)
         os.makedirs(os.path.join(out_dir, "images"), exist_ok=True)
 
+        log_info(f"💾 正在保存结果...")
         contents_det = ""
         contents = ""
         draw_images: List[Image.Image] = []
@@ -767,6 +871,7 @@ def process_pdf(
         zip_path = os.path.join("outputs", "vllm_gradio_pdf", f"pdf_result_{ts}.zip")
         
         if export_layout_pdf:
+            log_info(f"📊 正在生成布局PDF...")
             pil_to_pdf_img2pdf(draw_images, pdf_out_path)
         
         # 打包所有结果到 zip
@@ -777,10 +882,20 @@ def process_pdf(
                     arcname = os.path.relpath(file_path, out_dir)
                     zf.write(file_path, arcname)
         
+        total_time = time.time() - pdf_start_time
+        log_info("=" * 60)
+        log_success(f"📄 PDF处理完成！")
+        log_info(f"   文件名: {pdf_name}")
+        log_info(f"   处理页数: {len(images)} 页")
+        log_info(f"   总耗时: {total_time:.2f} 秒")
+        log_info(f"   平均速度: {total_time/len(images):.2f} 秒/页")
+        log_info(f"   输出目录: {out_dir}")
+        log_info("=" * 60)
+        
         return contents, contents_det, zip_path
 
     except Exception as e:
-        import traceback
+        log_error(f"PDF处理失败: {str(e)}")
         return f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}", "", None
 
 
