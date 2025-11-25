@@ -1,0 +1,58 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# 模型权重（太大，不应提交）
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# 输出结果
+outputs/
+
+# 安装包
+*.whl
+*.tar.gz
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 环境
+.env
+.venv
+env/
+venv/
+ENV/
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# 其他
+*.bak
