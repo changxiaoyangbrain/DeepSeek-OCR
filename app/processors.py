@@ -180,6 +180,9 @@ def pil_to_pdf(pil_images: List[Image.Image], output_path: str):
     
     try:
         pdf_bytes = img2pdf.convert(image_bytes_list)
+        if pdf_bytes is None:
+            log_error("PDF 生成失败: img2pdf.convert 返回 None")
+            return
         with open(output_path, "wb") as f:
             f.write(pdf_bytes)
     except Exception as e:
@@ -268,7 +271,7 @@ def process_single_image(
 
         log_info(f"🚀 开始OCR推理...")
         inference_start = time.time()
-        outputs = llm_local.generate([cache_item], sampling_params=sampling_params)
+        outputs = llm_local.generate([cache_item], sampling_params=sampling_params)  # type: ignore[arg-type]
         inference_time = time.time() - inference_start
         log_success(f"   推理完成, 耗时 {inference_time:.2f} 秒")
 

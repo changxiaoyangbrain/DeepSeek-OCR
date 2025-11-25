@@ -87,7 +87,9 @@ def setup_cuda_env():
     os.environ.setdefault("VLLM_USE_V1", "0")
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
     try:
-        if getattr(torch.version, "cuda", None) == "11.8":
+        version_module = getattr(torch, "version", None)
+        cuda_version = getattr(version_module, "cuda", None) if version_module else None
+        if cuda_version == "11.8":
             for p in [
                 "/usr/local/cuda-11.8/bin/ptxas",
                 "/usr/local/cuda/bin/ptxas",
