@@ -228,11 +228,15 @@ def process_image(
     max_concurrency: int,
     gpu_memory_utilization: float,
     max_tokens: int,
-):
+) -> Tuple[str, str, str, Optional[Image.Image], List[Image.Image]]:
+    """
+    处理单张图片，返回多个输出（类似 HuggingFace Demo）
+    返回: (清理后文本, Markdown渲染, 原始输出, 标注图片, 裁剪图片列表)
+    """
     try:
         # Guard empty input
         if image is None:
-            return "未检测到图片，请先上传图片后再点击处理。"
+            return "未检测到图片，请先上传图片后再点击处理。", "", "", None, []
         
         single_start_time = time.time()
         log_info("=" * 50)
@@ -249,34 +253,46 @@ def process_image(
             max_model_len=8192,
         )
 
+        # 判断是否需要 grounding
+        has_grounding = False
+        
         # 根据官方文档设置 prompt
-        # 文档: <image>\n<|grounding|>Convert the document to markdown.
-        # 纯文字: <image>\nFree OCR.
-        # 其他图片: <image>\n<|grounding|>OCR this image.
-        # 图表: <image>\nParse the figure.
-        # 通用描述: <image>\nDescribe this image in detail.
         if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
+            has_grounding = False
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+            has_grounding = True
         elif prompt_type == "图片OCR":
             prompt = "<image>\n<|grounding|>OCR this image. "
+            has_grounding = True
         elif prompt_type == "图表解析":
             prompt = "<image>\nParse the figure. "
+            has_grounding = False
         elif prompt_type == "图像描述":
             prompt = "<image>\nDescribe this image in detail. "
+            has_grounding = False
+        elif prompt_type == "定位识别":
+            if not custom_prompt.strip():
+                return "请输入要定位的文字", "", "", None, []
+            prompt = f"<image>\nLocate <|ref|>{custom_prompt.strip()}<|/ref|> in the image. "
+            has_grounding = True
         elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
+            has_grounding = '<|grounding|>' in custom_prompt
         else:
             prompt = "<image>\nFree OCR. "
         
-        log_info(f"   Prompt: {prompt[:50]}...")
+        log_info(f"   Prompt: {prompt[:60]}...")
+        log_info(f"   Grounding: {'是' if has_grounding else '否'}")
 
         # Apply size preset
         preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
-        # Use current checkbox for cropping (updated by preset change)
+        
+        # 保存原始图片用于绘制边界框
+        original_image = image.copy()
         image = image.convert("RGB")
         
         log_info(f"🔧 正在预处理图片...")
@@ -314,24 +330,41 @@ def process_image(
         inference_time = time.time() - inference_start
         log_success(f"   推理完成, 耗时 {inference_time:.2f} 秒")
 
-        content = outputs[0].outputs[0].text
-        
-        # 清理结果：移除结束标记
-        if "<｜end▁of▁sentence｜>" in content:
-            content = content.replace("<｜end▁of▁sentence｜>", "")
+        raw_content = outputs[0].outputs[0].text
         
         total_time = time.time() - single_start_time
         log_info("=" * 50)
         log_success(f"📷 单图识别完成！")
         log_info(f"   总耗时: {total_time:.2f} 秒")
-        log_info(f"   输出长度: {len(content)} 字符")
+        log_info(f"   输出长度: {len(raw_content)} 字符")
         log_info("=" * 50)
         
-        return content
+        # 处理输出
+        # 1. 清理后的文本（保留标签文本，不显示图片）
+        cleaned_text = clean_output_text(raw_content, include_images=False, remove_labels=False)
+        
+        # 2. Markdown 渲染（包含图片占位符，移除标签）
+        markdown_text = clean_output_text(raw_content, include_images=True, remove_labels=True)
+        
+        # 3. 绘制边界框和裁剪图片
+        annotated_image = None
+        cropped_images = []
+        
+        if has_grounding and '<|ref|>' in raw_content:
+            refs = extract_grounding_references(raw_content)
+            if refs:
+                annotated_image, cropped_images = draw_bounding_boxes_on_image(
+                    original_image, refs, extract_images=True
+                )
+                # 将裁剪的图片嵌入到 Markdown
+                markdown_text = embed_images_in_markdown(markdown_text, cropped_images)
+        
+        return cleaned_text, markdown_text, raw_content, annotated_image, cropped_images
 
     except Exception as e:
         log_error(f"单图识别失败: {str(e)}")
-        return f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        error_msg = f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        return error_msg, "", "", None, []
 
 def clean_formula(text: str) -> str:
     formula_pattern = r"\\\[(.*?)\\\]"
@@ -364,6 +397,152 @@ def re_match_pdf(text: str) -> Tuple[List[Tuple[str, str, str]], List[str], List
         else:
             mathes_other.append(a_match[0])
     return matches, mathes_image, mathes_other
+
+
+# ============================================
+# HuggingFace Demo 风格的辅助函数
+# ============================================
+
+def extract_grounding_references(text: str) -> List[Tuple[str, str, str]]:
+    """提取所有 grounding 标记"""
+    pattern = r'(<\|ref\|>(.*?)<\|/ref\|><\|det\|>(.*?)<\|/det\|>)'
+    return re.findall(pattern, text, re.DOTALL)
+
+
+def draw_bounding_boxes_on_image(
+    image: Image.Image, 
+    refs: List[Tuple[str, str, str]], 
+    extract_images: bool = False
+) -> Tuple[Image.Image, List[Image.Image]]:
+    """
+    在图片上绘制边界框，类似 HuggingFace Demo
+    返回: (标注后的图片, 裁剪的图片列表)
+    """
+    img_w, img_h = image.size
+    img_draw = image.copy()
+    draw = ImageDraw.Draw(img_draw)
+    overlay = Image.new('RGBA', img_draw.size, (0, 0, 0, 0))
+    draw2 = ImageDraw.Draw(overlay)
+    
+    # 尝试加载字体
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+    except Exception:
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 24)
+        except Exception:
+            font = ImageFont.load_default()
+    
+    crops = []
+    color_map = {}
+    np.random.seed(42)  # 固定随机种子保证颜色一致
+    
+    for ref in refs:
+        label = ref[1]
+        if label not in color_map:
+            color_map[label] = (
+                np.random.randint(50, 255), 
+                np.random.randint(50, 255), 
+                np.random.randint(50, 255)
+            )
+        color = color_map[label]
+        
+        try:
+            coords = eval(ref[2])
+        except Exception:
+            continue
+            
+        color_a = color + (60,)
+        
+        for box in coords:
+            try:
+                x1 = int(box[0] / 999 * img_w)
+                y1 = int(box[1] / 999 * img_h)
+                x2 = int(box[2] / 999 * img_w)
+                y2 = int(box[3] / 999 * img_h)
+                
+                # 裁剪图片区域
+                if extract_images and label == 'image':
+                    try:
+                        cropped = image.crop((x1, y1, x2, y2))
+                        crops.append(cropped)
+                    except Exception:
+                        pass
+                
+                # 绘制边界框
+                width = 5 if label == 'title' else 3
+                draw.rectangle([x1, y1, x2, y2], outline=color, width=width)
+                draw2.rectangle([x1, y1, x2, y2], fill=color_a)
+                
+                # 绘制标签
+                text_bbox = draw.textbbox((0, 0), label, font=font)
+                tw, th = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+                ty = max(0, y1 - th - 4)
+                draw.rectangle([x1, ty, x1 + tw + 4, ty + th + 4], fill=color)
+                draw.text((x1 + 2, ty + 2), label, font=font, fill=(255, 255, 255))
+            except Exception:
+                continue
+    
+    # 合成透明覆盖层
+    img_draw = img_draw.convert('RGBA')
+    img_draw = Image.alpha_composite(img_draw, overlay)
+    img_draw = img_draw.convert('RGB')
+    
+    return img_draw, crops
+
+
+def clean_output_text(text: str, include_images: bool = False, remove_labels: bool = False) -> str:
+    """
+    清理输出文本，处理 grounding 标记
+    - include_images: 是否用 [Figure X] 替换图片标记
+    - remove_labels: 是否移除所有标签（只保留文本内容）
+    """
+    if not text:
+        return ""
+    
+    pattern = r'(<\|ref\|>(.*?)<\|/ref\|><\|det\|>(.*?)<\|/det\|>)'
+    matches = re.findall(pattern, text, re.DOTALL)
+    img_num = 0
+    
+    for match in matches:
+        if '<|ref|>image<|/ref|>' in match[0]:
+            if include_images:
+                text = text.replace(match[0], f'\n\n**[图片 {img_num + 1}]**\n\n', 1)
+                img_num += 1
+            else:
+                text = text.replace(match[0], '', 1)
+        else:
+            if remove_labels:
+                text = text.replace(match[0], '', 1)
+            else:
+                # 保留标签文本
+                text = text.replace(match[0], match[1], 1)
+    
+    # 移除结束标记
+    text = text.replace("<｜end▁of▁sentence｜>", "")
+    
+    return text.strip()
+
+
+def embed_images_in_markdown(markdown: str, crops: List[Image.Image]) -> str:
+    """将裁剪的图片嵌入到 Markdown 中（Base64 编码）"""
+    import base64
+    if not crops:
+        return markdown
+    
+    for i, img in enumerate(crops):
+        try:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            markdown = markdown.replace(
+                f'**[图片 {i + 1}]**', 
+                f'\n\n![图片 {i + 1}](data:image/png;base64,{b64})\n\n', 
+                1
+            )
+        except Exception:
+            pass
+    return markdown
 
 
 def _is_image(path: str) -> bool:
@@ -444,6 +623,10 @@ def process_batch_upload(
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "定位识别":
+            if not custom_prompt.strip():
+                return "定位识别模式需要输入要查找的文字", "", None
+            prompt = f"<image>\nLocate <|ref|>{custom_prompt.strip()}<|/ref|> in the image. "
         elif prompt_type == "图片OCR":
             prompt = "<image>\n<|grounding|>OCR this image. "
         elif prompt_type == "图表解析":
@@ -593,6 +776,10 @@ def process_batch(
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "定位识别":
+            if not custom_prompt.strip():
+                return "定位识别模式需要输入要查找的文字", ""
+            prompt = f"<image>\nLocate <|ref|>{custom_prompt.strip()}<|/ref|> in the image. "
         elif prompt_type == "图片OCR":
             prompt = "<image>\n<|grounding|>OCR this image. "
         elif prompt_type == "图表解析":
@@ -823,6 +1010,10 @@ def process_pdf(
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "定位识别":
+            if not custom_prompt.strip():
+                return "定位识别模式需要输入要查找的文字", "", None
+            prompt = f"<image>\nLocate <|ref|>{custom_prompt.strip()}<|/ref|> in the image. "
         elif prompt_type == "图片OCR":
             prompt = "<image>\n<|grounding|>OCR this image. "
         elif prompt_type == "图表解析":
@@ -1271,6 +1462,7 @@ def create_demo():
                 <p class="tips-title">💡 <strong>使用提示</strong></p>
                 <p class="tips-content">• <b>Markdown转换</b>：文档/论文识别，保留版面结构、表格、公式（推荐）</p>
                 <p class="tips-content">• <b>自由识别</b>：纯文字提取，不含布局信息</p>
+                <p class="tips-content">• <b>定位识别</b>：在图片中查找并标注特定文字的位置</p>
                 <p class="tips-content">• <b>图片OCR</b>：通用图片中的文字识别</p>
                 <p class="tips-content">• <b>图表解析</b>：专门解析图表、流程图等</p>
                 <p class="tips-content">• <b>图像描述</b>：获取图片的详细描述</p>
@@ -1287,6 +1479,7 @@ def create_demo():
                     choices=[
                         "Markdown转换",
                         "自由识别",
+                        "定位识别",
                         "图片OCR",
                         "图表解析",
                         "图像描述",
@@ -1294,11 +1487,11 @@ def create_demo():
                     ],
                     value="Markdown转换",
                     label="📝 识别模式",
-                    info="根据内容类型选择：文档用Markdown、纯文字用自由识别、图表用图表解析"
+                    info="文档用Markdown、定位文字用定位识别"
                 )
                 custom_prompt = gr.Textbox(
-                    label="自定义指令（选择「自定义」时生效）",
-                    placeholder="例如: Locate <|ref|>关键词<|/ref|> in the image.",
+                    label="输入内容",
+                    placeholder="定位模式：输入要查找的文字\n自定义模式：输入完整指令，可添加 <|grounding|> 启用边界框",
                     lines=2,
                     visible=False,
                 )
@@ -1367,19 +1560,51 @@ def create_demo():
         with gr.Tabs():
             with gr.Tab("📷 单图识别"):
                 with gr.Row():
+                    # 左侧：上传和控制
                     with gr.Column(scale=1):
                         image_input = gr.Image(
                             label="📤 上传图片（支持拖拽/粘贴）",
                             type="pil",
                             sources=["upload", "clipboard"],
+                            height=350,
                         )
-                        process_btn_single = gr.Button("🚀 开始识别", variant="primary")
-                    with gr.Column(scale=1):
-                        output_text_single = gr.Textbox(
-                            label="📄 识别结果",
-                            lines=20,
-                            max_lines=30,
-                        )
+                        process_btn_single = gr.Button("🚀 开始识别", variant="primary", size="lg")
+                    
+                    # 右侧：多Tab输出
+                    with gr.Column(scale=2):
+                        with gr.Tabs():
+                            with gr.Tab("📝 文本"):
+                                output_text_single = gr.Textbox(
+                                    label="识别结果（清理后）",
+                                    lines=18,
+                                    max_lines=25,
+                                    show_copy_button=True,
+                                )
+                            with gr.Tab("🎨 Markdown"):
+                                output_markdown = gr.Markdown(
+                                    label="Markdown 渲染",
+                                    value="",
+                                )
+                            with gr.Tab("🖼️ 边界框"):
+                                output_annotated_image = gr.Image(
+                                    label="布局标注图（仅 Markdown/定位识别模式）",
+                                    type="pil",
+                                    height=450,
+                                )
+                            with gr.Tab("✂️ 裁剪图片"):
+                                output_gallery = gr.Gallery(
+                                    label="检测到的图片区域",
+                                    columns=3,
+                                    height=400,
+                                    show_label=False,
+                                )
+                            with gr.Tab("🔍 原始输出"):
+                                output_raw = gr.Textbox(
+                                    label="模型原始输出（含所有标记）",
+                                    lines=18,
+                                    max_lines=25,
+                                    show_copy_button=True,
+                                )
 
             with gr.Tab("📚 批量处理"):
                 gr.HTML(
@@ -1462,7 +1687,21 @@ def create_demo():
                         )
 
         def update_prompt_visibility(choice):
-            return gr.update(visible=(choice == "自定义"))
+            """根据模式更新输入框的可见性和标签"""
+            if choice == "定位识别":
+                return gr.update(
+                    visible=True, 
+                    label="🔍 要查找的文字",
+                    placeholder="输入要在图片中定位的文字，例如：机器人"
+                )
+            elif choice == "自定义":
+                return gr.update(
+                    visible=True, 
+                    label="✏️ 自定义指令",
+                    placeholder="输入完整指令，可添加 <|grounding|> 启用边界框检测"
+                )
+            else:
+                return gr.update(visible=False)
 
         prompt_type.change(
             fn=update_prompt_visibility,
@@ -1570,7 +1809,13 @@ def create_demo():
                 gpu_memory_utilization,
                 max_tokens,
             ],
-            outputs=[output_text_single],
+            outputs=[
+                output_text_single,      # 清理后的文本
+                output_markdown,         # Markdown 渲染
+                output_raw,              # 原始输出
+                output_annotated_image,  # 标注图片
+                output_gallery,          # 裁剪图片
+            ],
         )
 
         process_btn_batch.click(
