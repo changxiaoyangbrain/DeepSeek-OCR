@@ -233,20 +233,44 @@ def process_image(
         # Guard empty input
         if image is None:
             return "未检测到图片，请先上传图片后再点击处理。"
+        
+        single_start_time = time.time()
+        log_info("=" * 50)
+        log_info(f"📷 开始单图识别")
+        log_info("=" * 50)
+        log_info(f"   识别模式: {prompt_type}")
+        log_info(f"   模型档位: {model_size}")
+        log_info(f"   裁剪模式: {'开启' if crop_mode else '关闭'}")
+        log_info(f"   图片尺寸: {image.size}")
+        
         llm_local = init_llm(
             max_concurrency=max_concurrency,
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=8192,
         )
 
+        # 根据官方文档设置 prompt
+        # 文档: <image>\n<|grounding|>Convert the document to markdown.
+        # 纯文字: <image>\nFree OCR.
+        # 其他图片: <image>\n<|grounding|>OCR this image.
+        # 图表: <image>\nParse the figure.
+        # 通用描述: <image>\nDescribe this image in detail.
         if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "图片OCR":
+            prompt = "<image>\n<|grounding|>OCR this image. "
+        elif prompt_type == "图表解析":
+            prompt = "<image>\nParse the figure. "
+        elif prompt_type == "图像描述":
+            prompt = "<image>\nDescribe this image in detail. "
         elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
             prompt = "<image>\nFree OCR. "
+        
+        log_info(f"   Prompt: {prompt[:50]}...")
 
         # Apply size preset
         preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
@@ -254,10 +278,15 @@ def process_image(
         image_size = preset["image_size"]
         # Use current checkbox for cropping (updated by preset change)
         image = image.convert("RGB")
+        
+        log_info(f"🔧 正在预处理图片...")
+        preprocess_start = time.time()
         proc = DeepseekOCRProcessor(image_size=image_size, base_size=base_size)
         image_features = proc.tokenize_with_images(
             images=[image], bos=True, eos=True, cropping=crop_mode
         )
+        preprocess_time = time.time() - preprocess_start
+        log_success(f"   预处理完成, 耗时 {preprocess_time:.2f} 秒")
 
         logits_processors = [
             NoRepeatNGramLogitsProcessor(
@@ -277,15 +306,31 @@ def process_image(
             "multi_modal_data": {"image": image_features},
         }
 
+        log_info(f"🚀 开始OCR推理...")
+        inference_start = time.time()
         outputs = llm_local.generate(
             [cache_item], sampling_params=sampling_params
         )
+        inference_time = time.time() - inference_start
+        log_success(f"   推理完成, 耗时 {inference_time:.2f} 秒")
 
         content = outputs[0].outputs[0].text
+        
+        # 清理结果：移除结束标记
+        if "<｜end▁of▁sentence｜>" in content:
+            content = content.replace("<｜end▁of▁sentence｜>", "")
+        
+        total_time = time.time() - single_start_time
+        log_info("=" * 50)
+        log_success(f"📷 单图识别完成！")
+        log_info(f"   总耗时: {total_time:.2f} 秒")
+        log_info(f"   输出长度: {len(content)} 字符")
+        log_info("=" * 50)
+        
         return content
 
     except Exception as e:
-        import traceback
+        log_error(f"单图识别失败: {str(e)}")
         return f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
 
 def clean_formula(text: str) -> str:
@@ -394,10 +439,17 @@ def process_batch_upload(
         
         log_success(f"成功加载 {len(images)} 张图片")
 
+        # 根据官方文档设置 prompt
         if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "图片OCR":
+            prompt = "<image>\n<|grounding|>OCR this image. "
+        elif prompt_type == "图表解析":
+            prompt = "<image>\nParse the figure. "
+        elif prompt_type == "图像描述":
+            prompt = "<image>\nDescribe this image in detail. "
         elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
@@ -536,10 +588,17 @@ def process_batch(
             except Exception as e:
                 print(f"skip file: {image_path} due to error: {e}")
 
+        # 根据官方文档设置 prompt
         if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "图片OCR":
+            prompt = "<image>\n<|grounding|>OCR this image. "
+        elif prompt_type == "图表解析":
+            prompt = "<image>\nParse the figure. "
+        elif prompt_type == "图像描述":
+            prompt = "<image>\nDescribe this image in detail. "
         elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
@@ -759,10 +818,17 @@ def process_pdf(
             max_model_len=8192,
         )
 
+        # 根据官方文档设置 prompt
         if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
         elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
+        elif prompt_type == "图片OCR":
+            prompt = "<image>\n<|grounding|>OCR this image. "
+        elif prompt_type == "图表解析":
+            prompt = "<image>\nParse the figure. "
+        elif prompt_type == "图像描述":
+            prompt = "<image>\nDescribe this image in detail. "
         elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
@@ -1203,8 +1269,11 @@ def create_demo():
             """
             <div class="tips-box">
                 <p class="tips-title">💡 <strong>使用提示</strong></p>
-                <p class="tips-content">• 推荐使用「Markdown转换」模式获得结构化输出，支持复杂版面、表格、公式识别</p>
-                <p class="tips-content">• 遇到显存异常时，请先尝试重启引擎；如仍有问题请重启服务</p>
+                <p class="tips-content">• <b>Markdown转换</b>：文档/论文识别，保留版面结构、表格、公式（推荐）</p>
+                <p class="tips-content">• <b>自由识别</b>：纯文字提取，不含布局信息</p>
+                <p class="tips-content">• <b>图片OCR</b>：通用图片中的文字识别</p>
+                <p class="tips-content">• <b>图表解析</b>：专门解析图表、流程图等</p>
+                <p class="tips-content">• <b>图像描述</b>：获取图片的详细描述</p>
             </div>
             """
         )
@@ -1215,14 +1284,21 @@ def create_demo():
         with gr.Row():
             with gr.Column(scale=1):
                 prompt_type = gr.Radio(
-                    choices=["自由识别", "Markdown转换", "自定义"],
+                    choices=[
+                        "Markdown转换",
+                        "自由识别",
+                        "图片OCR",
+                        "图表解析",
+                        "图像描述",
+                        "自定义",
+                    ],
                     value="Markdown转换",
                     label="📝 识别模式",
-                    info="Markdown转换模式可保留文档结构"
+                    info="根据内容类型选择：文档用Markdown、纯文字用自由识别、图表用图表解析"
                 )
                 custom_prompt = gr.Textbox(
                     label="自定义指令（选择「自定义」时生效）",
-                    placeholder="请输入自定义识别指令...",
+                    placeholder="例如: Locate <|ref|>关键词<|/ref|> in the image.",
                     lines=2,
                     visible=False,
                 )
