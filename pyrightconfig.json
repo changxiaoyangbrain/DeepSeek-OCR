@@ -1,0 +1,6 @@
+{
+  "extraPaths": [
+    "DeepSeek-OCR-master/DeepSeek-OCR-vllm"
+  ],
+  "reportMissingImports": "warning"
+}

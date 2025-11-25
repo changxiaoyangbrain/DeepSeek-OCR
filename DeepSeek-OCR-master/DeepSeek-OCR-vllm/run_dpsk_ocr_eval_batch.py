@@ -7,7 +7,7 @@ if torch.version.cuda == '11.8':
 os.environ['VLLM_USE_V1'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
-from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, MAX_CONCURRENCY, CROP_MODE, NUM_WORKERS
+from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, MAX_CONCURRENCY, CROP_MODE, NUM_WORKERS, TOKENIZER_PATH
 from concurrent.futures import ThreadPoolExecutor
 import glob
 from PIL import Image
@@ -21,12 +21,17 @@ from process.image_process import DeepseekOCRProcessor
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
 
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 llm = LLM(
     model=MODEL_PATH,
+    tokenizer=TOKENIZER_PATH,
     hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
     block_size=256,
     enforce_eager=False,
-    trust_remote_code=True, 
+    trust_remote_code=False, 
     max_model_len=8192,
     swap_space=0,
     max_num_seqs = MAX_CONCURRENCY,
@@ -98,13 +103,19 @@ if __name__ == "__main__":
 
     print(f'{Colors.RED}glob images.....{Colors.RESET}')
 
-    images_path = glob.glob(f'{INPUT_PATH}/*')
+def _is_jpg(path):
+    return os.path.splitext(path)[1].lower() in {'.jpg', '.jpeg'}
 
-    images = []
+images_path = [p for p in glob.glob(f'{INPUT_PATH}/*') if _is_jpg(p)]
 
-    for image_path in images_path:
+images = []
+
+for image_path in images_path:
+    try:
         image = Image.open(image_path).convert('RGB')
         images.append(image)
+    except Exception as e:
+        print(f"skip file: {image_path} due to error: {e}")
 
     prompt = PROMPT
 
@@ -145,7 +156,9 @@ if __name__ == "__main__":
     for output, image in zip(outputs_list, images_path):
 
         content = output.outputs[0].text
-        mmd_det_path = output_path + image.split('/')[-1].replace('.jpg', '_det.md')
+        base_name = os.path.basename(image)
+        name_no_ext = os.path.splitext(base_name)[0]
+        mmd_det_path = os.path.join(output_path, f"{name_no_ext}_det.md")
 
         with open(mmd_det_path, 'w', encoding='utf-8') as afile:
             afile.write(content)
@@ -153,9 +166,9 @@ if __name__ == "__main__":
         content = clean_formula(content)
         matches_ref, mathes_other = re_match(content)
         for idx, a_match_other in enumerate(tqdm(mathes_other, desc="other")):
-            content = content.replace(a_match_other, '').replace('\n\n\n\n', '\n\n').replace('\n\n\n', '\n\n').replace('<center>', '').replace('</center>', '')
-        
-        mmd_path = output_path + image.split('/')[-1].replace('.jpg', '.md')
+            content = content.replace(a_match_other, '').replace('\\n\\n\\n\\n', '\\n\\n').replace('\\n\\n\\n', '\\n\\n').replace('<center>', '').replace('</center>', '')
+
+        mmd_path = os.path.join(output_path, f"{name_no_ext}.md")
 
         with open(mmd_path, 'w', encoding='utf-8') as afile:
             afile.write(content)

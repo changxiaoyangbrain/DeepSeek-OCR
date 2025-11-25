@@ -14,7 +14,7 @@ os.environ['VLLM_USE_V1'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 
-from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, SKIP_REPEAT, MAX_CONCURRENCY, NUM_WORKERS, CROP_MODE
+from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, SKIP_REPEAT, MAX_CONCURRENCY, NUM_WORKERS, CROP_MODE, TOKENIZER_PATH
 
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
@@ -29,12 +29,18 @@ from process.image_process import DeepseekOCRProcessor
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
 
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 llm = LLM(
     model=MODEL_PATH,
+    tokenizer=TOKENIZER_PATH,
     hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
     block_size=256,
     enforce_eager=False,
-    trust_remote_code=True, 
+    # Use local model implementation registered via ModelRegistry
+    trust_remote_code=False, 
     max_model_len=8192,
     swap_space=0,
     max_num_seqs=MAX_CONCURRENCY,

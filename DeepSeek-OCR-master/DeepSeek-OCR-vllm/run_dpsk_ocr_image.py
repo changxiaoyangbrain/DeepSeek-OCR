@@ -3,8 +3,20 @@ import re
 import os
 
 import torch
-if torch.version.cuda == '11.8':
-    os.environ["TRITON_PTXAS_PATH"] = "/usr/local/cuda-11.8/bin/ptxas"
+# Set TRITON_PTXAS_PATH for Triton kernels when running on CUDA 11.8 toolkit.
+# If multiple CUDA toolkits are present, try common locations; otherwise skip.
+try:
+    cuda_ver = getattr(torch.version, 'cuda', None)
+    if cuda_ver == '11.8':
+        for ptxas_path in [
+            "/usr/local/cuda-11.8/bin/ptxas",
+            "/usr/local/cuda/bin/ptxas",
+        ]:
+            if os.path.exists(ptxas_path):
+                os.environ["TRITON_PTXAS_PATH"] = ptxas_path
+                break
+except Exception:
+    pass
 
 os.environ['VLLM_USE_V1'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
@@ -19,7 +31,7 @@ import numpy as np
 from tqdm import tqdm
 from process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from process.image_process import DeepseekOCRProcessor
-from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, CROP_MODE
+from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, CROP_MODE, TOKENIZER_PATH
 
 
 
@@ -147,13 +159,20 @@ def process_image_with_refs(image, ref_texts):
 async def stream_generate(image=None, prompt=''):
 
 
+    # Offline-first: prefer local HF snapshot tokenizer path if available
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
     engine_args = AsyncEngineArgs(
         model=MODEL_PATH,
+        tokenizer=TOKENIZER_PATH,
         hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
         block_size=256,
         max_model_len=8192,
         enforce_eager=False,
-        trust_remote_code=True,  
+        # Use local model implementation registered via ModelRegistry
+        trust_remote_code=False,  
         tensor_parallel_size=1,
         gpu_memory_utilization=0.75,
     )

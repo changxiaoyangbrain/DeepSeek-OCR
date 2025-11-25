@@ -59,6 +59,7 @@
 - [Install](#install)
 - [vLLM Inference](#vllm-inference)
 - [Transformers Inference](#transformers-inference)
+ - [Gradio (vLLM)](#gradio-vllm)
   
 
 
@@ -161,6 +162,31 @@ model_outputs = llm.generate(model_input, sampling_param)
 for output in model_outputs:
     print(output.outputs[0].text)
 ```
+
+## Gradio (vLLM)
+
+快速启动 vLLM Gradio（端口 7860），默认离线运行并读取本地模型与分词器：
+
+```bash
+source /root/miniconda3/etc/profile.d/conda.sh \
+  && conda activate deepseek-ocr \
+  && export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 HF_HUB_ENABLE_HF_TRANSFER=1 \
+  && export CUDA_VISIBLE_DEVICES=0 DEMO_PORT=7860 \
+  && python -u gradio_vllm_demo.py
+```
+
+访问地址：`http://0.0.0.0:7860/`
+
+功能：
+- 单图：上传图片并选择 Prompt（Free/Markdown/Custom）
+- 批量：输入目录路径（默认 `assets/`），批量处理 `.jpg/.jpeg` 并写入 `outputs/vllm_gradio_batch/<time>/`
+- PDF：上传 PDF，输出合并的 `.mmd` / `_det.mmd` 与布局标注 PDF 到 `outputs/vllm_gradio_pdf/<time>/`
+- 高级参数：并发（`max_num_seqs`）、显存利用率（`gpu_memory_utilization`）、生成长度（`max_tokens`）
+
+推荐（4090D）：
+- `gpu_memory_utilization=0.88~0.92`
+- `max_num_seqs=12~24`
+- `CROP_MODE=开启`
 ## Transformers-Inference
 - Transformers
 ```python

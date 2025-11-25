@@ -127,12 +127,14 @@ class DeepseekOCRProcessor(ProcessorMixin):
         sft_format: str = "deepseek",
         mask_prompt: bool = True,
         ignore_id: int = -100,
+        image_size: int = None,
+        base_size: int = None,
         **kwargs,
     ):
 
         # self.candidate_resolutions = candidate_resolutions # placeholder no use
-        self.image_size = IMAGE_SIZE
-        self.base_size = BASE_SIZE
+        self.image_size = IMAGE_SIZE if image_size is None else int(image_size)
+        self.base_size = BASE_SIZE if base_size is None else int(base_size)
         # self.patch_size = patch_size
         self.patch_size = 16 
         self.image_mean = image_mean
@@ -181,10 +183,36 @@ class DeepseekOCRProcessor(ProcessorMixin):
         self.mask_prompt = mask_prompt
         self.ignore_id = ignore_id
 
+        # Initialize ProcessorMixin with tokenizer only to avoid unexpected kwargs errors.
         super().__init__(
-            tokenizer,
-            **kwargs,
+            tokenizer
         )
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path=None, *args, **kwargs):
+        # Bypass HF AutoProcessor local dir lookup; use preloaded tokenizer if not provided.
+        if 'tokenizer' not in kwargs or kwargs.get('tokenizer') is None:
+            kwargs['tokenizer'] = TOKENIZER
+        # Allow only supported init kwargs to avoid TypeError from ProcessorMixin.
+        allowed = {
+            'tokenizer',
+            'candidate_resolutions',
+            'patch_size',
+            'downsample_ratio',
+            'image_mean',
+            'image_std',
+            'normalize',
+            'image_token',
+            'pad_token',
+            'add_special_token',
+            'sft_format',
+            'mask_prompt',
+            'ignore_id',
+            'image_size',
+            'base_size',
+        }
+        filtered = {k: v for k, v in kwargs.items() if k in allowed}
+        return cls(**filtered)
 
 
     
@@ -360,7 +388,7 @@ class DeepseekOCRProcessor(ProcessorMixin):
 
             image_shapes.append(image.size)
 
-            if image.size[0] <= 640 and image.size[1] <= 640:
+            if image.size[0] <= self.image_size and image.size[1] <= self.image_size:
                 crop_ratio = [1, 1]
             else:
                 if cropping:
@@ -368,7 +396,7 @@ class DeepseekOCRProcessor(ProcessorMixin):
                     # best_width, best_height = select_best_resolution(image.size, self.candidate_resolutions)
                     # print('image ', image.size)
                     # print('open_size:', image.size)
-                    images_crop_raw, crop_ratio = dynamic_preprocess(image, image_size=IMAGE_SIZE)
+                    images_crop_raw, crop_ratio = dynamic_preprocess(image, image_size=self.image_size)
                     # print('crop_ratio: ', crop_ratio)
                 else:
                     # best_width, best_height = self.image_size, self.image_size
