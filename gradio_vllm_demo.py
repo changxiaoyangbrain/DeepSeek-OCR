@@ -45,11 +45,11 @@ current_engine_cfg = {
 
 # Model size presets (accuracy/speed tradeoff)
 size_configs = {
-    "Tiny": {"base_size": 512, "image_size": 512, "crop_mode": False},
-    "Small": {"base_size": 640, "image_size": 640, "crop_mode": False},
-    "Base": {"base_size": 1024, "image_size": 1024, "crop_mode": False},
-    "Large": {"base_size": 1280, "image_size": 1280, "crop_mode": False},
-    "Gundam (Recommended)": {"base_size": 1024, "image_size": 640, "crop_mode": True},
+    "极速（Tiny）": {"base_size": 512, "image_size": 512, "crop_mode": False},
+    "快速（Small）": {"base_size": 640, "image_size": 640, "crop_mode": False},
+    "标准（Base）": {"base_size": 1024, "image_size": 1024, "crop_mode": False},
+    "精细（Large）": {"base_size": 1280, "image_size": 1280, "crop_mode": False},
+    "高达模式（推荐）": {"base_size": 1024, "image_size": 640, "crop_mode": True},
 }
 
 
@@ -202,17 +202,17 @@ def process_image(
             max_model_len=8192,
         )
 
-        if prompt_type == "Free OCR":
+        if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
-        elif prompt_type == "Markdown Conversion":
+        elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
-        elif prompt_type == "Custom":
+        elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
             prompt = "<image>\nFree OCR. "
 
         # Apply size preset
-        preset = size_configs.get(model_size, size_configs["Gundam (Recommended)"])
+        preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
         # Use current checkbox for cropping (updated by preset change)
@@ -342,16 +342,16 @@ def process_batch_upload(
         if not images:
             return "没有可处理的有效图片文件", ""
 
-        if prompt_type == "Free OCR":
+        if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
-        elif prompt_type == "Markdown Conversion":
+        elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
-        elif prompt_type == "Custom":
+        elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
             prompt = "<image>\nFree OCR. "
 
-        preset = size_configs.get(model_size, size_configs["Gundam (Recommended)"])
+        preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
         proc = DeepseekOCRProcessor(image_size=image_size, base_size=base_size)
@@ -462,16 +462,16 @@ def process_batch(
             except Exception as e:
                 print(f"skip file: {image_path} due to error: {e}")
 
-        if prompt_type == "Free OCR":
+        if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
-        elif prompt_type == "Markdown Conversion":
+        elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
-        elif prompt_type == "Custom":
+        elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
             prompt = "<image>\nFree OCR. "
 
-        preset = size_configs.get(model_size, size_configs["Gundam (Recommended)"])
+        preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
         proc = DeepseekOCRProcessor(image_size=image_size, base_size=base_size)
@@ -672,11 +672,11 @@ def process_pdf(
             max_model_len=8192,
         )
 
-        if prompt_type == "Free OCR":
+        if prompt_type == "自由识别":
             prompt = "<image>\nFree OCR. "
-        elif prompt_type == "Markdown Conversion":
+        elif prompt_type == "Markdown转换":
             prompt = "<image>\n<|grounding|>Convert the document to markdown. "
-        elif prompt_type == "Custom":
+        elif prompt_type == "自定义":
             prompt = f"<image>\n{custom_prompt}"
         else:
             prompt = "<image>\nFree OCR. "
@@ -685,7 +685,7 @@ def process_pdf(
         if not images:
             return "PDF 中无可处理页面", "", None
 
-        preset = size_configs.get(model_size, size_configs["Gundam (Recommended)"])
+        preset = size_configs.get(model_size, size_configs["高达模式（推荐）"])
         base_size = preset["base_size"]
         image_size = preset["image_size"]
         proc = DeepseekOCRProcessor(image_size=image_size, base_size=base_size)
@@ -784,59 +784,353 @@ def process_pdf(
         return f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}", "", None
 
 
-def create_demo():
-    # Older Gradio versions may not support the theme kwarg; keep compatibility by omitting it.
-    with gr.Blocks(title="DeepSeek-OCR vLLM Demo") as demo:
-        gr.Markdown(
-            """
-            > 🛈 引擎重建 vs 服务重启
-            - 点击“♻️ 重启引擎”仅清理显存并重建 vLLM 引擎；不会应用代码改动
-            - 修改 Python 源码或 UI 布局后请使用 `run_demo.sh` 重启服务
-            - 遇到 CUDA/显存异常：先尝试“重启引擎”，仍异常再重启服务
-            - 需要自动重启服务：使用 `./run_demo.sh --watch` 启用文件监听
-            """
-        )
-        gr.Markdown(
-            """
-            # 🔍 DeepSeek-OCR vLLM Demo
 
-            使用 vLLM 引擎进行离线 OCR 推理（本地 MODEL/TOKENIZER）。
-            - 支持并发与显存参数配置
-            - 适配 4090D，KV Cache 高并发
-            - 提供 单图 / 批量 / PDF 三种模式
+def create_demo():
+    # 自定义 CSS 样式 - 长小养照护智能资源数字化平台主题
+    custom_css = """
+    /* 全局样式 */
+    .gradio-container {
+        font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        min-height: 100vh;
+    }
+    
+    /* 主容器 */
+    .main {
+        background: rgba(255, 255, 255, 0.95) !important;
+        border-radius: 20px !important;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+        margin: 20px !important;
+        padding: 30px !important;
+    }
+    
+    /* 页面头部样式 */
+    .header-banner {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
+        padding: 40px 30px;
+        border-radius: 16px;
+        margin-bottom: 25px;
+        text-align: center;
+        box-shadow: 0 10px 40px rgba(30, 60, 114, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .header-banner::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+        pointer-events: none;
+    }
+    
+    .header-banner h1 {
+        color: #ffffff !important;
+        font-size: 2.5em !important;
+        font-weight: 700 !important;
+        margin: 0 0 15px 0 !important;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        letter-spacing: 3px;
+    }
+    
+    .header-banner p {
+        color: rgba(255, 255, 255, 0.9) !important;
+        font-size: 1.1em !important;
+        margin: 8px 0 !important;
+        line-height: 1.6;
+    }
+    
+    .header-banner .subtitle {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 8px 20px;
+        border-radius: 25px;
+        margin-top: 10px;
+        backdrop-filter: blur(10px);
+    }
+    
+    /* 提示框样式 */
+    .tips-box {
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+        border-left: 4px solid #4caf50;
+        border-radius: 0 12px 12px 0;
+        padding: 15px 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.15);
+    }
+    
+    .tips-box .tips-title {
+        color: #2e7d32 !important;
+        margin: 0 0 10px 0 !important;
+        font-size: 1em;
+        font-weight: 600;
+    }
+    
+    .tips-box .tips-title strong {
+        color: #2e7d32 !important;
+    }
+    
+    .tips-box .tips-content {
+        color: #1b5e20 !important;
+        margin: 6px 0 !important;
+        font-size: 0.9em;
+        line-height: 1.5;
+    }
+    
+    /* 选项卡样式 */
+    .tabs > .tab-nav {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
+        border-radius: 12px !important;
+        padding: 5px !important;
+        margin-bottom: 20px !important;
+    }
+    
+    .tabs > .tab-nav > button {
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        padding: 12px 24px !important;
+        color: #1e3c72 !important;
+        background: transparent !important;
+    }
+    
+    .tabs > .tab-nav > button:hover {
+        background: rgba(30, 60, 114, 0.1) !important;
+        color: #1e3c72 !important;
+    }
+    
+    .tabs > .tab-nav > button.selected {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%) !important;
+        color: white !important;
+        box-shadow: 0 4px 15px rgba(30, 60, 114, 0.3) !important;
+    }
+    
+    /* 按钮样式 */
+    .primary {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%) !important;
+        border: none !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        font-size: 1.05em !important;
+        padding: 12px 28px !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 15px rgba(30, 60, 114, 0.3) !important;
+    }
+    
+    .primary:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 25px rgba(30, 60, 114, 0.4) !important;
+    }
+    
+    button.secondary {
+        background: linear-gradient(135deg, #6c757d 0%, #495057 100%) !important;
+        border: none !important;
+        border-radius: 8px !important;
+        color: white !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    button.secondary:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+    }
+    
+    /* 输入框样式 */
+    textarea, input[type="text"] {
+        border: 2px solid #e9ecef !important;
+        border-radius: 10px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    textarea:focus, input[type="text"]:focus {
+        border-color: #2a5298 !important;
+        box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.15) !important;
+    }
+    
+    /* 滑块样式 */
+    input[type="range"] {
+        accent-color: #2a5298 !important;
+    }
+    
+    /* 文件上传区域 */
+    .file-upload {
+        border: 2px dashed #2a5298 !important;
+        border-radius: 12px !important;
+        background: rgba(42, 82, 152, 0.03) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .file-upload:hover {
+        background: rgba(42, 82, 152, 0.08) !important;
+        border-color: #1e3c72 !important;
+    }
+    
+    /* 图片上传区域 */
+    .image-upload {
+        border-radius: 12px !important;
+        overflow: hidden;
+    }
+    
+    /* Accordion 手风琴样式 */
+    .accordion {
+        border: 1px solid #e9ecef !important;
+        border-radius: 12px !important;
+        overflow: hidden;
+    }
+    
+    .accordion > .label-wrap {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
+        padding: 12px 16px !important;
+    }
+    
+    /* 设置面板 */
+    .settings-panel {
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        border-radius: 16px;
+        padding: 20px;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    }
+    
+    /* 隐藏 Gradio 原生 footer */
+    footer.svelte-1rjryqp,
+    footer.svelte-mpyp5e,
+    .gradio-container > footer,
+    footer[class*="svelte"],
+    .built-with {
+        display: none !important;
+    }
+    
+    /* 页脚样式 */
+    .footer {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: white;
+        padding: 25px;
+        border-radius: 12px;
+        margin-top: 30px;
+        text-align: center;
+    }
+    
+    .footer p {
+        margin: 5px 0 !important;
+        color: rgba(255, 255, 255, 0.9) !important;
+    }
+    
+    .footer .copyright {
+        font-size: 0.95em;
+        opacity: 0.9;
+    }
+    
+    .footer .tech-info {
+        font-size: 0.85em;
+        opacity: 0.7;
+        margin-top: 10px !important;
+    }
+    
+    /* 单选按钮组 */
+    .radio-group {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    
+    /* 复选框 */
+    input[type="checkbox"] {
+        accent-color: #2a5298 !important;
+    }
+    
+    /* 状态文本框 */
+    .status-box textarea {
+        background: #f8f9fa !important;
+        font-family: 'Consolas', 'Monaco', monospace !important;
+    }
+    
+    /* 响应式调整 */
+    @media (max-width: 768px) {
+        .header-banner h1 {
+            font-size: 1.8em !important;
+        }
+        .main {
+            margin: 10px !important;
+            padding: 15px !important;
+        }
+    }
+    
+    /* 动画效果 */
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .gradio-container > * {
+        animation: fadeIn 0.5s ease-out;
+    }
+    """
+    
+    # Gradio 6.0+ 使用 launch(css=...) 而不是 Blocks(css=...)
+    with gr.Blocks(title="长小养照护智能资源数字化平台") as demo:
+        # 页面头部 Banner
+        gr.HTML(
+            """
+            <div class="header-banner">
+                <h1>🏥 长小养照护智能资源数字化平台</h1>
+                <p>智能文档识别 · 高效数字化转换 · 专业照护知识管理</p>
+                <div class="subtitle">📄 支持图片OCR · 批量处理 · PDF智能解析</div>
+            </div>
             """
         )
+        
+        # 提示信息
+        gr.HTML(
+            """
+            <div class="tips-box">
+                <p class="tips-title">💡 <strong>使用提示</strong></p>
+                <p class="tips-content">• 推荐使用「Markdown转换」模式获得结构化输出，支持复杂版面、表格、公式识别</p>
+                <p class="tips-content">• 遇到显存异常时，请先尝试重启引擎；如仍有问题请重启服务</p>
+            </div>
+            """
+        )
+        
+        # 设置区域标题
+        gr.Markdown("### ⚙️ 通用设置")
 
         with gr.Row():
             with gr.Column(scale=1):
-                gr.Markdown("### ⚙️ 设置（通用）")
                 prompt_type = gr.Radio(
-                    choices=["Free OCR", "Markdown Conversion", "Custom"],
-                    value="Markdown Conversion",
-                    label="Prompt 类型",
+                    choices=["自由识别", "Markdown转换", "自定义"],
+                    value="Markdown转换",
+                    label="📝 识别模式",
+                    info="Markdown转换模式可保留文档结构"
                 )
                 custom_prompt = gr.Textbox(
-                    label="自定义 Prompt（选择 Custom 时生效）",
-                    placeholder="输入自定义指令...",
+                    label="自定义指令（选择「自定义」时生效）",
+                    placeholder="请输入自定义识别指令...",
                     lines=2,
                     visible=False,
                 )
+            with gr.Column(scale=1):
                 crop_mode = gr.Checkbox(
-                    label="启用裁剪（CROP_MODE）",
+                    label="📐 启用智能裁剪",
                     value=bool(CROP_MODE),
+                    info="适用于大尺寸文档图片"
                 )
                 model_size = gr.Radio(
                     choices=[
-                        "Tiny",
-                        "Small",
-                        "Base",
-                        "Large",
-                        "Gundam (Recommended)",
+                        "极速（Tiny）",
+                        "快速（Small）",
+                        "标准（Base）",
+                        "精细（Large）",
+                        "高达模式（推荐）",
                     ],
-                    value="Base",
-                    label="模型尺寸预设",
+                    value="标准（Base）",
+                    label="🎯 模型精度",
+                    info="高达模式平衡速度与精度，推荐使用"
                 )
-                with gr.Accordion("高级参数", open=False):
+            with gr.Column(scale=1):
+                with gr.Accordion("⚡ 高级参数", open=False):
                     # 动态解析并发滑条的默认值与上限，避免默认值越界
                     try:
                         _default_concurrency = int(MAX_CONCURRENCY) if MAX_CONCURRENCY else 12
@@ -849,90 +1143,100 @@ def create_demo():
                         maximum=_concurrency_max,
                         step=1,
                         value=_concurrency_default,
-                        label="并发（max_num_seqs）",
+                        label="并发数量",
+                        info="建议根据显存大小调整"
                     )
                     gpu_memory_utilization = gr.Slider(
                         minimum=0.5,
                         maximum=0.98,
                         step=0.01,
                         value=0.85,
-                        label="显存利用率（gpu_memory_utilization）",
+                        label="显存利用率",
+                        info="建议保持在0.85左右"
                     )
                     max_tokens = gr.Slider(
                         minimum=256,
                         maximum=16384,
                         step=512,
                         value=16384,
-                        label="生成长度（max_tokens）",
+                        label="最大生成长度",
+                        info="文档较长时请增大此值"
                     )
-                    restart_btn = gr.Button("♻️ 重启引擎（清理显存）")
-                    restart_service_btn = gr.Button("🔄 重启服务（watch）")
+                    with gr.Row():
+                        restart_btn = gr.Button("♻️ 重启引擎", variant="secondary")
+                        estimate_btn = gr.Button("🧮 估算并发", variant="secondary")
+                    restart_service_btn = gr.Button("🔄 重启服务", variant="secondary")
                     engine_status = gr.Textbox(
                         label="引擎状态",
-                        value="已就绪",
+                        value="✅ 已就绪",
                         lines=2,
                         interactive=False,
                     )
-                    estimate_btn = gr.Button("🧮 根据显存估算并发")
-
-            with gr.Column(scale=1):
-                gr.Markdown(
-                    f"""
-                    ### 🔧 当前模型
-                    - MODEL_PATH: `{MODEL_PATH}`
-                    - TOKENIZER_PATH: `{TOKENIZER_PATH}`
-                    """
-                )
 
         with gr.Tabs():
-            with gr.Tab("单图"):
+            with gr.Tab("📷 单图识别"):
                 with gr.Row():
                     with gr.Column(scale=1):
                         image_input = gr.Image(
-                            label="上传图片",
+                            label="📤 上传图片（支持拖拽/粘贴）",
                             type="pil",
                             sources=["upload", "clipboard"],
                         )
-                        process_btn_single = gr.Button("🚀 开始处理（单图）", variant="primary")
+                        process_btn_single = gr.Button("🚀 开始识别", variant="primary")
                     with gr.Column(scale=1):
                         output_text_single = gr.Textbox(
-                            label="提取文本",
+                            label="📄 识别结果",
                             lines=20,
                             max_lines=30,
                         )
 
-            with gr.Tab("批量"):
-                gr.Markdown("**上传多张图片进行批量 OCR 处理**（支持 jpg/png/webp/bmp/tiff）")
+            with gr.Tab("📚 批量处理"):
+                gr.HTML(
+                    '''
+                    <div style="background:linear-gradient(135deg,#e8f4fd,#d4e9f7);padding:15px 20px;border-radius:10px;margin-bottom:15px;border-left:4px solid #1e3c72;">
+                        <p style="margin:0;"><span style="color:#1e3c72 !important;font-weight:bold;font-size:1.1em;">📂 批量识别模式</span> <span style="color:#333;">- 支持同时上传多张图片进行批处理</span></p>
+                        <p style="margin:5px 0 0 0;color:#555;font-size:0.9em;">支持格式: JPG, PNG, WebP, BMP, TIFF</p>
+                    </div>
+                    '''
+                )
                 with gr.Row():
                     with gr.Column(scale=1):
                         batch_files = gr.File(
-                            label="上传图片（可多选）",
+                            label="📤 上传图片（可多选）",
                             file_count="multiple",
                             file_types=["image"],
                             type="filepath",
                         )
-                        process_btn_batch = gr.Button("🚀 开始处理（批量）", variant="primary")
+                        process_btn_batch = gr.Button("🚀 开始批量识别", variant="primary")
                     with gr.Column(scale=1):
                         batch_outdir_text = gr.Textbox(
-                            label="处理状态",
+                            label="📊 处理状态",
                             lines=2,
                             interactive=False,
                         )
                         batch_download = gr.File(
-                            label="📥 下载结果（ZIP）",
+                            label="📥 下载识别结果（ZIP压缩包）",
                             interactive=False,
                         )
                         batch_preview_text = gr.Textbox(
-                            label="预览（前3项节选）",
+                            label="👀 结果预览（前3项）",
                             lines=15,
                             max_lines=25,
                         )
 
-            with gr.Tab("PDF"):
+            with gr.Tab("📑 PDF解析"):
                 with gr.Row():
                     with gr.Column(scale=1):
+                        gr.HTML(
+                            '''
+                            <div style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);padding:15px 20px;border-radius:10px;margin-bottom:15px;border-left:4px solid #ff9800;">
+                                <p style="margin:0;"><span style="color:#e65100 !important;font-weight:bold;font-size:1.1em;">📑 PDF智能解析</span></p>
+                                <p style="margin:5px 0 0 0;color:#555;font-size:0.9em;">自动提取PDF内容并转换为Markdown格式</p>
+                            </div>
+                            '''
+                        )
                         pdf_file = gr.File(
-                            label="上传 PDF",
+                            label="📤 上传PDF文件",
                             file_types=[".pdf"],
                             type="filepath",
                         )
@@ -941,31 +1245,33 @@ def create_demo():
                             maximum=288,
                             step=12,
                             value=144,
-                            label="PDF DPI（渲染）",
+                            label="🔍 渲染精度（DPI）",
+                            info="数值越高精度越好，但速度越慢"
                         )
                         export_layout_pdf = gr.Checkbox(
-                            label="导出布局 PDF（较慢，默认关闭）",
+                            label="📐 导出布局分析PDF",
                             value=False,
+                            info="生成带标注的布局分析文档（处理较慢）"
                         )
-                        process_btn_pdf = gr.Button("🚀 开始处理（PDF）", variant="primary")
+                        process_btn_pdf = gr.Button("🚀 开始解析PDF", variant="primary")
                     with gr.Column(scale=1):
                         pdf_mmd_text = gr.Textbox(
-                            label="Markdown 输出（合并）",
+                            label="📄 Markdown输出",
                             lines=20,
                             max_lines=30,
                         )
                         pdf_det_text = gr.Textbox(
-                            label="检测输出（合并）",
+                            label="🔍 详细检测结果",
                             lines=20,
                             max_lines=30,
                         )
                         pdf_layouts_file = gr.File(
-                            label="📥 下载结果（ZIP，含 Markdown + 图片）",
+                            label="📥 下载完整结果（ZIP压缩包）",
                             interactive=False,
                         )
 
         def update_prompt_visibility(choice):
-            return gr.update(visible=(choice == "Custom"))
+            return gr.update(visible=(choice == "自定义"))
 
         prompt_type.change(
             fn=update_prompt_visibility,
@@ -975,7 +1281,7 @@ def create_demo():
 
         # 当选择尺寸预设时，更新裁剪推荐值
         def apply_size_preset(choice):
-            preset = size_configs.get(choice, size_configs["Gundam (Recommended)"])
+            preset = size_configs.get(choice, size_configs["高达模式（推荐）"])
             return gr.update(value=preset["crop_mode"]) 
 
         model_size.change(
@@ -1107,8 +1413,19 @@ def create_demo():
             ],
             outputs=[pdf_mmd_text, pdf_det_text, pdf_layouts_file],
         )
+        
+        # 页脚版权信息
+        gr.HTML(
+            """
+            <div class="footer">
+                <p style="font-size:1.1em;font-weight:600;">🏥 长小养照护智能资源数字化平台</p>
+                <p class="copyright">© 2025 海南长小养智能科技 版权所有</p>
+                <p class="tech-info">技术支持: DeepSeek-OCR · vLLM 高性能推理引擎</p>
+            </div>
+            """
+        )
 
-    return demo
+    return demo, custom_css
 
 
 if __name__ == "__main__":
@@ -1116,20 +1433,32 @@ if __name__ == "__main__":
     _setup_cuda_env()
     # 可选启动预热：设置环境变量 WARMUP_ON_START=1 启用
     def warmup_engine_on_start():
+        if os.environ.get("WARMUP_ON_START", "0") != "1":
+            print("[INFO] 跳过模型预热（设置 WARMUP_ON_START=1 可启用）")
+            return
+        
+        print("=" * 50)
+        print("🚀 正在预热模型，请稍候...")
+        print("=" * 50)
+        
         try:
-            if os.environ.get("WARMUP_ON_START", "0") != "1":
-                return
-            try:
-                _default_concurrency = int(MAX_CONCURRENCY) if MAX_CONCURRENCY else 8
-            except Exception:
-                _default_concurrency = 8
-            gmu = 0.85
+            _default_concurrency = int(MAX_CONCURRENCY) if MAX_CONCURRENCY else 8
+        except Exception:
+            _default_concurrency = 8
+        
+        gmu = 0.85
+        print(f"[INFO] 加载配置: 并发={_default_concurrency}, 显存利用率={gmu}, max_len=8192")
+        
+        try:
             llm_local = init_llm(
                 max_concurrency=_default_concurrency,
                 gpu_memory_utilization=gmu,
                 max_model_len=8192,
             )
+            print("[INFO] ✅ 模型加载完成")
+            
             # 构造极小图像进行一次轻量生成以触发图捕获与缓存
+            print("[INFO] 正在预热推理引擎...")
             from PIL import Image as _Image
             img = _Image.new("RGB", (64, 64), color=(255, 255, 255))
             proc = DeepseekOCRProcessor(image_size=640, base_size=1024)
@@ -1137,16 +1466,21 @@ if __name__ == "__main__":
             cache_item = {"prompt": "<image>\nWarmup.", "multi_modal_data": {"image": image_features}}
             sp = SamplingParams(temperature=0.0, max_tokens=16, skip_special_tokens=True)
             llm_local.generate([cache_item], sampling_params=sp)
-        except Exception:
-            # 预热失败不影响正常启动
-            pass
+            
+            print("=" * 50)
+            print("✅ 模型预热完成，服务即将启动！")
+            print("=" * 50)
+        except Exception as e:
+            print(f"[WARN] ⚠️ 模型预热失败: {e}")
+            print("[INFO] 服务将继续启动，首次推理时会加载模型")
 
     warmup_engine_on_start()
-    demo = create_demo()
+    demo, custom_css = create_demo()
     port = int(os.environ.get("DEMO_PORT", "7860"))
     demo.launch(
         server_name="0.0.0.0",
         server_port=port,
         share=False,
         debug=True,
+        css=custom_css,
     )
